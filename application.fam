@@ -1,0 +1,15 @@
+App(
+    appid="thermal_cam",
+    name="Thermal Camera",
+    apptype=FlipperAppType.EXTERNAL,
+    entry_point="thermal_cam_app",
+    # GUI thread only: drawing plus key handling. The sensor worker allocates
+    # its own 5 kB stack in thermal_worker.c.
+    stack_size=2 * 1024,
+    fap_category="GPIO",
+    fap_icon="icons/thermal_10px.png",
+    fap_icon_assets="icons",
+    fap_author="Hasan SAWAN",
+    fap_version="1.2",
+    fap_description="Thermal camera for the MLX90640 sensor: live view, spot meter, body-temperature screening, image export, USB and Bluetooth streaming.",
+)

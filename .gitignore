@@ -1,0 +1,18 @@
+# ufbt build output
+dist/
+.ufbt/
+build/
+*.fap
+*.elf
+.clang-format
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+venv/

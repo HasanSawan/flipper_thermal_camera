@@ -1,0 +1,1584 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Thermal Camera Viewer</title>
+<meta name="description" content="Live viewer for the Flipper Zero MLX90640 thermal camera over Web Serial (USB) or Web Bluetooth">
+<meta name="author" content="Hasan SAWAN">
+<style>
+/* ------------------------------------------------------------------ tokens */
+:root {
+  color-scheme: light;
+  --bg:            #f3f2ef;
+  --surface-1:     #fcfcfb;
+  --surface-2:     #efeeea;
+  --border:        #dddcd6;
+  --text-primary:  #0b0b0b;
+  --text-secondary:#52514e;
+  --text-muted:    #7a7975;
+  --accent:        #eb6834;
+  --accent-ink:    #ffffff;
+  --grid:          #e6e5e0;
+  --axis:          #b9b8b2;
+  --good:          #0ca30c;
+  --warning:       #fab219;
+  --critical:      #d03b3b;
+  --image-bg:      #111110;
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;
+  --s5: #e87ba4; --s6: #008300; --s7: #4a3aa7; --s8: #e34948;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --bg:            #121211;
+    --surface-1:     #1a1a19;
+    --surface-2:     #232321;
+    --border:        #34342f;
+    --text-primary:  #ffffff;
+    --text-secondary:#c3c2b7;
+    --text-muted:    #8d8c84;
+    --accent:        #f07a45;
+    --accent-ink:    #1a1a19;
+    --grid:          #2a2a27;
+    --axis:          #4a4a44;
+    --image-bg:      #0b0b0a;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+    --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg:            #121211;
+  --surface-1:     #1a1a19;
+  --surface-2:     #232321;
+  --border:        #34342f;
+  --text-primary:  #ffffff;
+  --text-secondary:#c3c2b7;
+  --text-muted:    #8d8c84;
+  --accent:        #f07a45;
+  --accent-ink:    #1a1a19;
+  --grid:          #2a2a27;
+  --axis:          #4a4a44;
+  --image-bg:      #0b0b0a;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+  --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
+}
+
+/* ------------------------------------------------------------------ base */
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--text-primary);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.num { font-variant-numeric: tabular-nums; }
+button, select, input { font: inherit; color: inherit; }
+button {
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px;
+  padding: 6px 12px; cursor: pointer; white-space: nowrap;
+}
+button:hover { border-color: var(--axis); }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+button.active { background: var(--text-primary); color: var(--surface-1); border-color: var(--text-primary); }
+button:disabled { opacity: .45; cursor: default; }
+select, input[type=number] {
+  background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; padding: 5px 8px; min-width: 0;
+}
+input[type=range] { width: 100%; accent-color: var(--accent); }
+label { color: var(--text-secondary); }
+
+/* ------------------------------------------------------------------ layout */
+header {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--surface-1);
+}
+header h1 { font-size: 16px; margin: 0 8px 0 0; font-weight: 650; letter-spacing: -.01em; }
+header .spacer { flex: 1; }
+.pill {
+  display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px;
+  background: var(--surface-2); color: var(--text-secondary); font-size: 13px;
+}
+.pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); }
+.pill[data-state="live"] .dot { background: var(--good); }
+.pill[data-state="wait"] .dot { background: var(--warning); }
+.pill[data-state="error"] .dot { background: var(--critical); }
+.hstat { color: var(--text-secondary); font-size: 13px; }
+.hstat b { color: var(--text-primary); font-weight: 600; }
+
+main {
+  display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 16px;
+  padding: 16px 20px 24px; max-width: 1500px; margin: 0 auto;
+}
+.col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.card {
+  background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px;
+}
+.card h2 {
+  font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted);
+  margin: 0 0 10px; font-weight: 600; display: flex; align-items: center; gap: 8px;
+}
+.card h2 .right { margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 400; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.field { display: grid; grid-template-columns: 110px minmax(0,1fr); align-items: center; gap: 8px; margin: 6px 0; }
+.field > span.val { justify-self: end; }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; background: transparent; padding: 5px 10px; }
+.seg button + button { border-left: 1px solid var(--border); }
+.seg button.active { background: var(--text-primary); color: var(--surface-1); }
+.field .seg { display: flex; width: 100%; }
+.field .seg button { flex: 1; padding: 5px 4px; }
+.banner {
+  margin: 12px 20px 0; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--border);
+  background: var(--surface-1); color: var(--text-secondary);
+}
+.banner strong { color: var(--text-primary); }
+.banner.warn { border-color: var(--warning); }
+.hidden { display: none !important; }
+
+/* image */
+.imgwrap {
+  position: relative; background: var(--image-bg); border-radius: 10px; overflow: hidden; aspect-ratio: 4 / 3;
+  /* keep the charts in view on ordinary desktop screens */
+  width: min(100%, calc(64vh * 4 / 3)); margin: 0 auto;
+}
+.imgwrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+#overlay { cursor: crosshair; touch-action: none; }
+.imgwrap .empty {
+  position: absolute; inset: 0; display: grid; place-content: center; text-align: center;
+  color: #c9c8c0; gap: 8px; padding: 20px;
+}
+.imgwrap .empty b { color: #fff; font-size: 16px; }
+.colorbar { display: grid; grid-template-columns: auto minmax(0,1fr) auto; gap: 10px; align-items: center; margin-top: 10px; }
+.colorbar canvas { width: 100%; height: 14px; border-radius: 4px; display: block; }
+.imgtools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+.imgtools .hint { color: var(--text-muted); font-size: 12px; margin-left: auto; }
+
+/* stat tiles */
+.tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.tile { background: var(--surface-2); border-radius: 10px; padding: 10px 12px; }
+.tile .k { font-size: 12px; color: var(--text-secondary); display: flex; align-items: center; gap: 6px; }
+.tile .v { font-size: 26px; font-weight: 650; letter-spacing: -.02em; line-height: 1.15; }
+.tile .v small { font-size: 13px; font-weight: 500; color: var(--text-secondary); margin-left: 2px; }
+.key { width: 14px; height: 2px; border-radius: 1px; display: inline-block; }
+
+/* measurements list */
+.mlist { display: flex; flex-direction: column; gap: 6px; }
+.m {
+  display: grid; grid-template-columns: 14px 34px minmax(0,1fr) auto; gap: 8px; align-items: center;
+  padding: 6px 8px; border-radius: 8px; background: var(--surface-2);
+}
+.m.sel { outline: 2px solid var(--accent); }
+.m .sw { width: 12px; height: 12px; border-radius: 3px; }
+.m .n { font-weight: 600; }
+.m .vals { color: var(--text-secondary); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.m .vals b { color: var(--text-primary); font-weight: 600; }
+.m button { padding: 2px 8px; }
+.muted { color: var(--text-muted); font-size: 13px; }
+
+/* charts */
+.charts { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 16px; }
+.chartbox { position: relative; height: 220px; }
+.chartbox canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 8px; font-size: 12px; color: var(--text-secondary); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.tip {
+  position: fixed; pointer-events: none; z-index: 10; min-width: 120px;
+  background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 4px 18px rgba(0,0,0,.18); padding: 8px 10px; font-size: 12px;
+}
+.tip .t { color: var(--text-muted); margin-bottom: 4px; }
+.tip .r { display: grid; grid-template-columns: 14px auto 1fr; gap: 6px; align-items: center; }
+.tip .r b { font-size: 13px; justify-self: start; }
+.tip .r span.lbl { color: var(--text-secondary); justify-self: end; }
+details.tableview { margin-top: 8px; font-size: 12px; color: var(--text-secondary); }
+details.tableview table { border-collapse: collapse; margin-top: 6px; }
+details.tableview td, details.tableview th { padding: 2px 10px 2px 0; text-align: right; font-variant-numeric: tabular-nums; }
+details.tableview th { color: var(--text-muted); font-weight: 500; }
+
+footer { text-align: center; color: var(--text-muted); font-size: 12px; padding: 0 20px 24px; }
+footer a { color: inherit; }
+
+@media (max-width: 980px) {
+  main { grid-template-columns: minmax(0,1fr); padding: 16px; }
+  .col { display: contents; }
+  #cardImage { order: 1; } #cardReadout { order: 2; } #cardMeas { order: 3; }
+  .charts { order: 4; } #cardDisplay { order: 5; } #cardDevice { order: 6; } #cardSave { order: 7; }
+  .charts { grid-template-columns: minmax(0,1fr); }
+  header { padding: 12px 16px; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>Thermal Camera Viewer</h1>
+  <span class="pill" id="status" data-state="off"><span class="dot"></span><span id="statusText">Not connected</span></span>
+  <span class="hstat num" id="hstats"></span>
+  <span class="spacer"></span>
+  <button id="btnTheme" title="Switch light / dark">Theme</button>
+  <button id="btnDemo">Demo</button>
+  <button id="btnConnectBle" class="primary">Connect Bluetooth</button>
+  <button id="btnConnect" class="primary">Connect USB</button>
+</header>
+
+<div class="banner warn hidden" id="noSerial">
+  <strong>This browser has no Web Serial or Web Bluetooth.</strong> Open this page in Chrome, Chromium or Edge (Firefox and Safari support neither).
+  On Fedora: <code>sudo dnf install chromium</code>. The Demo button works in any browser.
+</div>
+<div class="banner hidden" id="bleHint">
+  <strong>Bluetooth:</strong> on the Flipper press Left/Right to <em>Bluetooth</em>, then OK. Here, pick the device whose name starts with <em>Flipper</em>.
+  The first time, the Flipper shows a <strong>PIN</strong>: type it into the pairing prompt of your computer.
+  Bluetooth is much slower than USB (about 1–4 frames per second). The Flipper takes one Bluetooth connection at a time: if its phone app is connected, close the app first.
+</div>
+<div class="banner warn hidden" id="cliHint">
+  <strong>That is the Flipper's command-line port.</strong> The thermal stream is on the <em>second</em> Flipper port
+  (usually <code>/dev/ttyACM1</code>). Click <em>Disconnect</em>, then <em>Connect</em> again and pick the other one.
+  Also check that the Flipper shows <em>USB &rsaquo; STREAMING</em> (USB mode, press OK).
+</div>
+
+<main>
+  <div class="col">
+    <section class="card" id="cardImage">
+      <h2>Live image <span class="right muted num" id="imgInfo"></span></h2>
+      <div class="imgwrap" id="imgwrap">
+        <canvas id="image"></canvas>
+        <canvas id="overlay" tabindex="0" aria-label="Thermal image. Click to add a measurement point, drag to add a box."></canvas>
+        <div class="empty" id="empty">
+          <b>No stream yet</b>
+          <span>USB: on the Flipper press Left/Right to <em>USB</em>, then OK. Click <em>Connect USB</em> and choose the port ending in <code>ACM1</code>.</span>
+          <span>Bluetooth: press Left/Right to <em>Bluetooth</em>, then OK. Click <em>Connect Bluetooth</em>.</span>
+        </div>
+      </div>
+      <div class="colorbar">
+        <span class="num" id="cbMin">–</span>
+        <canvas id="colorbar" width="512" height="14"></canvas>
+        <span class="num" id="cbMax">–</span>
+      </div>
+      <div class="imgtools">
+        <span class="seg" role="group" aria-label="Tool">
+          <button data-tool="point" class="active">Point</button>
+          <button data-tool="box">Box</button>
+          <button data-tool="none">Look</button>
+        </span>
+        <button id="btnFreeze">Freeze</button>
+        <span class="hint">Click adds a point · drag draws a box · drag a marker to move it</span>
+      </div>
+    </section>
+
+    <section class="charts">
+      <div class="card">
+        <h2>Temperature over time
+          <span class="right">
+            <select id="winSel" aria-label="Time window">
+              <option value="30">30 s</option><option value="60" selected>1 min</option>
+              <option value="300">5 min</option><option value="600">10 min</option>
+            </select>
+          </span>
+        </h2>
+        <div class="chartbox"><canvas id="ts"></canvas></div>
+        <div class="legend" id="tsLegend"></div>
+        <details class="tableview"><summary>Table view</summary><div id="tsTable"></div></details>
+      </div>
+      <div class="card">
+        <h2>Histogram <span class="right muted">pixels per bin</span></h2>
+        <div class="chartbox"><canvas id="hist"></canvas></div>
+        <details class="tableview"><summary>Table view</summary><div id="histTable"></div></details>
+      </div>
+    </section>
+  </div>
+
+  <div class="col">
+    <section class="card" id="cardReadout">
+      <h2>Readout <span class="right muted" id="unitNote"></span></h2>
+      <div class="tiles">
+        <div class="tile"><div class="k"><span class="key" style="background:var(--s2)"></span>Max</div><div class="v num" id="tMax">–</div></div>
+        <div class="tile"><div class="k"><span class="key" style="background:var(--s1)"></span>Centre spot</div><div class="v num" id="tCtr">–</div></div>
+        <div class="tile"><div class="k"><span class="key" style="background:var(--s3)"></span>Min</div><div class="v num" id="tMin">–</div></div>
+        <div class="tile"><div class="k">Sensor (ambient)</div><div class="v num" id="tAmb">–</div></div>
+      </div>
+    </section>
+
+    <section class="card" id="cardMeas">
+      <h2>Measurements <span class="right"><button id="btnClear">Clear</button></span></h2>
+      <div class="mlist" id="mlist"><div class="muted">Click the image to add a point, or drag to draw a box. Up to 5.</div></div>
+    </section>
+
+    <section class="card" id="cardDisplay">
+      <h2>Display</h2>
+      <div class="field"><label for="palSel">Palette</label>
+        <select id="palSel"><option value="ironbow">Ironbow</option><option value="rainbow">Rainbow</option>
+          <option value="gray">Gray</option><option value="hotmetal">Hot metal</option><option value="arctic">Arctic</option></select></div>
+      <div class="field"><label>Range</label>
+        <span class="seg" role="group" aria-label="Range">
+          <button data-range="auto">Auto</button><button data-range="smooth" class="active">Smooth</button><button data-range="manual">Manual</button>
+        </span></div>
+      <div class="field" id="manualRow"><label>Min / Max</label>
+        <span class="row"><input type="number" id="rMin" value="20" step="1" style="width:74px"> <input type="number" id="rMax" value="40" step="1" style="width:74px"></span></div>
+      <div class="field"><label>Units</label>
+        <span class="seg" role="group" aria-label="Units"><button data-unit="C" class="active">°C</button><button data-unit="F">°F</button></span></div>
+      <div class="field"><label>Pixels</label>
+        <span class="seg" role="group" aria-label="Interpolation"><button data-interp="smooth" class="active">Smooth</button><button data-interp="raw">Raw</button></span></div>
+      <div class="field"><label>Orientation</label>
+        <span class="row"><button id="btnMirror">Mirror</button><button id="btnFlip">Flip</button></span></div>
+      <div class="field"><label for="chkMarkers">Hot/cold marks</label><span><input type="checkbox" id="chkMarkers" checked></span></div>
+      <div class="field"><label for="isoIn">Isotherm ≥</label>
+        <span class="row"><input type="number" id="isoIn" placeholder="off" step="0.5" style="width:90px"><span class="muted" id="isoUnit">°C</span></span></div>
+    </section>
+
+    <section class="card" id="cardDevice">
+      <h2>Flipper <span class="right muted num" id="devInfo"></span></h2>
+      <div class="field"><label for="emis">Emissivity</label><span class="row" style="flex-wrap:nowrap"><input type="range" id="emis" min="50" max="100" value="95"><span class="num" id="emisV" style="width:36px;text-align:right">0.95</span></span></div>
+      <div class="field"><label for="rateSel">Refresh</label>
+        <select id="rateSel"><option value="0">0.5 Hz</option><option value="1">1 Hz</option><option value="2">2 Hz</option><option value="3">4 Hz</option>
+          <option value="4" selected>8 Hz</option><option value="5">16 Hz</option><option value="6">32 Hz</option><option value="7">64 Hz</option></select></div>
+      <div class="field"><label for="speedSel">I²C speed</label>
+        <select id="speedSel"><option value="0">100 kHz</option><option value="1" selected>400 kHz</option><option value="2">1 MHz (exp.)</option></select></div>
+      <div class="field"><label for="modeSel">Read mode</label>
+        <select id="modeSel"><option value="1" selected>Chess</option><option value="0">Interleave</option></select></div>
+      <div class="row" style="margin-top:8px">
+        <button id="btnDevCap">Save still on SD</button>
+        <button id="btnDevRec">Start REC on SD</button>
+        <button id="btnDevGraph" title="The Flipper's spot-meter history, as CSV">Save spot graph</button>
+      </div>
+      <p class="muted" style="margin:8px 0 0">Emissivity 0.95 suits skin, paint, wood and fabric. Bare metal reads far too cold at any setting.</p>
+    </section>
+
+    <section class="card" id="cardSave">
+      <h2>Save</h2>
+      <div class="row">
+        <button id="btnPng">Snapshot PNG</button>
+        <button id="btnCsv">CSV</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button id="btnRecVid">Record video</button>
+        <button id="btnRecRaw">Record raw</button>
+        <span class="muted num" id="recInfo"></span>
+      </div>
+      <h2 style="margin-top:16px">Last few seconds <span class="right muted num" id="bufInfo"></span></h2>
+      <div class="field"><label for="lastSel">Save the last</label>
+        <select id="lastSel"><option value="10">10 s</option><option value="30" selected>30 s</option>
+          <option value="60">1 min</option><option value="120">2 min</option><option value="300">5 min</option></select></div>
+      <div class="row">
+        <button id="btnLastVid">Video</button>
+        <button id="btnLastReadings" title="Time, max, centre, min and every measurement, one row per frame">Readings CSV</button>
+        <button id="btnLastFrames" title="Every pixel of every frame, one row per frame">Frames CSV</button>
+        <button id="btnLastRaw">Raw</button>
+      </div>
+      <p class="muted" style="margin:8px 0 0">The viewer always keeps the last 5 minutes, so you can save something after it happened.
+        Raw files are float32 frames, the same format the Flipper writes; convert them with <code>tools/raw2png.py</code>.</p>
+    </section>
+  </div>
+</main>
+
+<footer>Thermal Camera v1.2 · designed by Hasan SAWAN · <a href="mailto:hsn.saw@gmail.com">hsn.saw@gmail.com</a></footer>
+<div class="tip hidden" id="tip"></div>
+
+<script>
+"use strict";
+/* ==========================================================================
+ * Constants and state
+ * ======================================================================== */
+const W = 32, H = 24, NPIX = W * H;
+const MAGIC = [0x54, 0x43, 0x41, 0x4D];          // "TCAM"
+const HDR = 24, MAX_PAYLOAD = NPIX * 2;
+const MAX_MEAS = 5;
+const SERIES_SLOTS = ["--s1","--s2","--s3","--s4","--s5","--s6","--s7","--s8"];
+// Fixed entity -> slot: the first three are permanent, user marks take 4..8.
+const SLOT_CENTRE = 0, SLOT_MAX = 1, SLOT_MIN = 2;
+
+const PALETTES = {
+  ironbow:  [[0,0,0,0],[51,40,0,90],[102,130,0,120],[153,220,60,40],[204,255,170,0],[255,255,255,255]],
+  rainbow:  [[0,0,0,131],[32,0,60,170],[96,5,255,255],[160,255,255,0],[223,250,0,0],[255,128,0,0]],
+  gray:     [[0,0,0,0],[255,255,255,255]],
+  hotmetal: [[0,0,0,0],[84,180,0,0],[168,255,180,0],[255,255,255,255]],
+  arctic:   [[0,0,0,40],[64,0,110,200],[128,120,220,255],[192,255,240,180],[255,255,255,255]],
+};
+const RATE_NAMES = ["0.5 Hz","1 Hz","2 Hz","4 Hz","8 Hz","16 Hz","32 Hz","64 Hz"];
+const SPEED_NAMES = ["100 kHz","400 kHz","1 MHz"];
+
+const S = {
+  frame: null,             // latest decoded frame
+  frozen: null,            // frame kept on screen while frozen
+  palette: "ironbow", lut: null,
+  rangeMode: "smooth", rMin: 20, rMax: 40, sLo: null, sHi: null,
+  unit: "C", interp: "smooth", mirror: false, flip: false, markers: true, iso: null,
+  tool: "point", meas: [], selected: null, nextId: 1,
+  series: new Map(),        // key -> {name, slot, pts: [{t, v}]}
+  winSec: 60,
+  fpsEma: 0, lastArrive: 0, frames: 0, crcErrors: 0, dropped: 0, lastSeq: null,
+  source: null,             // "serial" | "ble" | "demo"
+  recRaw: null, recVid: null,
+  dev: null,
+  buf: [],                  // replay buffer: the last BUF_SEC seconds of frames
+  lastVid: null,            // replay-buffer video being rendered
+};
+const BUF_SEC = 300, BUF_MAX_FRAMES = 6000;
+
+const $ = (id) => document.getElementById(id);
+const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const cToU = (c) => S.unit === "F" ? c * 9 / 5 + 32 : c;
+const uToC = (u) => S.unit === "F" ? (u - 32) * 5 / 9 : u;
+const fmt = (c, d = 1) => (c == null || !isFinite(c)) ? "–" : cToU(c).toFixed(d);
+const unitLabel = () => "°" + S.unit;
+
+/* ==========================================================================
+ * Palette
+ * ======================================================================== */
+function buildLut(stops) {
+  const lut = new Uint8Array(256 * 3);
+  for (let l = 0; l < 256; l++) {
+    let c = stops[stops.length - 1].slice(1);
+    if (l <= stops[0][0]) c = stops[0].slice(1);
+    else for (let i = 1; i < stops.length; i++) {
+      if (l <= stops[i][0]) {
+        const a = stops[i - 1], b = stops[i], span = b[0] - a[0];
+        const t = span ? (l - a[0]) / span : 0;
+        c = [0, 1, 2].map(k => Math.trunc(a[k + 1] + (b[k + 1] - a[k + 1]) * t));
+        break;
+      }
+    }
+    lut[l * 3] = c[0]; lut[l * 3 + 1] = c[1]; lut[l * 3 + 2] = c[2];
+  }
+  return lut;
+}
+function setPalette(name) { S.palette = name; S.lut = buildLut(PALETTES[name]); drawColorbar(); requestRender(); }
+
+/* ==========================================================================
+ * Protocol
+ * ======================================================================== */
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; }
+  return t;
+})();
+function crc32(bytes, start, end) {
+  let c = 0xFFFFFFFF;
+  for (let i = start; i < end; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+
+class StreamParser {
+  constructor(onPacket) { this.buf = new Uint8Array(0); this.onPacket = onPacket; this.junk = 0; this.textish = 0; this.packets = 0; }
+  push(chunk) {
+    const nb = new Uint8Array(this.buf.length + chunk.length);
+    nb.set(this.buf); nb.set(chunk, this.buf.length); this.buf = nb;
+    let pos = 0;
+    const b = this.buf;
+    while (true) {
+      // find magic
+      let m = -1;
+      for (let i = pos; i + 3 < b.length; i++) {
+        if (b[i] === 0x54 && b[i + 1] === 0x43 && b[i + 2] === 0x41 && b[i + 3] === 0x4D) { m = i; break; }
+      }
+      if (m < 0) { this.skip(b, pos, Math.max(pos, b.length - 3)); pos = Math.max(pos, b.length - 3); break; }
+      this.skip(b, pos, m); pos = m;
+      if (b.length - pos < HDR) break;
+      const dv = new DataView(b.buffer, b.byteOffset + pos, HDR);
+      const ver = dv.getUint8(4), type = dv.getUint8(5), plen = dv.getUint16(6, true);
+      if (ver !== 1 || (type !== 1 && type !== 2) || plen > MAX_PAYLOAD || (type === 1 && plen !== MAX_PAYLOAD)) {
+        S.crcErrors++; pos += 1; continue;
+      }
+      const total = HDR + plen + 4;
+      if (b.length - pos < total) break;
+      const want = new DataView(b.buffer, b.byteOffset + pos + HDR + plen, 4).getUint32(0, true);
+      if (crc32(b, pos, pos + HDR + plen) !== want) { S.crcErrors++; pos += 1; continue; }
+      this.packets++;
+      this.onPacket(decodePacket(b.subarray(pos, pos + total), type, plen));
+      pos += total;
+    }
+    this.buf = this.buf.slice(pos);
+  }
+  skip(b, from, to) {
+    for (let i = from; i < to; i++) { this.junk++; const c = b[i]; if ((c >= 32 && c < 127) || c === 10 || c === 13) this.textish++; }
+  }
+}
+
+function decodePacket(p, type, plen) {
+  const dv = new DataView(p.buffer, p.byteOffset, p.length);
+  const pk = {
+    type, seq: dv.getUint32(8, true), ms: dv.getUint32(12, true),
+    ta: dv.getInt16(16, true) / 100, e: dv.getUint8(18), flags: dv.getUint8(19),
+    rate: dv.getUint8(20), speed: dv.getUint8(21),
+  };
+  if (type === 1) {
+    const t = new Float32Array(NPIX);
+    for (let i = 0; i < NPIX; i++) t[i] = dv.getInt16(HDR + i * 2, true) / 100;
+    pk.temps = t;
+  } else {
+    pk.text = new TextDecoder().decode(p.subarray(HDR, HDR + plen));
+  }
+  return pk;
+}
+
+function onPacket(pk) {
+  if (S.lastSeq != null) {
+    const gap = (pk.seq - S.lastSeq - 1) >>> 0;
+    if (gap > 0 && gap < 100000) S.dropped += gap;
+  }
+  S.lastSeq = pk.seq;
+  if (pk.type === 2) { onInfo(pk); return; }
+  onFrame(pk);
+}
+
+function onInfo(pk) {
+  const kv = {};
+  pk.text.split(";").forEach(p => { const [k, v] = p.split("="); if (k) kv[k.trim()] = (v || "").trim(); });
+  S.dev = kv;
+  if (kv.e) { $("emis").value = kv.e; $("emisV").textContent = (kv.e / 100).toFixed(2); }
+  if (kv.r) $("rateSel").value = kv.r;
+  if (kv.s) $("speedSel").value = kv.s;
+  if (kv.c) $("modeSel").value = kv.c;
+  $("devInfo").textContent = (kv.ver ? "app v" + kv.ver : "") + (kv.link ? " · " + kv.link.toUpperCase() : "");
+  if (kv.rec != null) {
+    const on = kv.rec === "1";
+    $("btnDevRec").textContent = on ? "Stop REC on SD" : "Start REC on SD";
+    $("btnDevRec").classList.toggle("active", on);
+  }
+  $("cliHint").classList.add("hidden");
+  S.gotInfo = true;
+}
+
+/* ==========================================================================
+ * Frame analysis
+ * ======================================================================== */
+function statsOf(t) {
+  let mn = Infinity, mx = -Infinity, imn = 0, imx = 0;
+  for (let i = 0; i < NPIX; i++) { const v = t[i]; if (v < mn) { mn = v; imn = i; } if (v > mx) { mx = v; imx = i; } }
+  return { min: mn, max: mx, imin: imn, imax: imx, centre: spotAvg(t, 16, 12, 5) };
+}
+// Same disc the Flipper's spot meter uses: diameter d centred on pixel (cx, cy).
+function spotAvg(t, cx, cy, d) {
+  const r = Math.floor(d / 2), lim = d * d; let s = 0, n = 0;
+  for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+    if (4 * (dx * dx + dy * dy) > lim) continue;
+    const x = cx + dx, y = cy + dy; if (x < 0 || y < 0 || x >= W || y >= H) continue;
+    s += t[y * W + x]; n++;
+  }
+  return n ? s / n : NaN;
+}
+// Bilinear sample in sensor space; pixel centres sit at (i + 0.5).
+function sampleAt(t, x, y) {
+  let fx = x - 0.5, fy = y - 0.5;
+  fx = Math.min(Math.max(fx, 0), W - 1); fy = Math.min(Math.max(fy, 0), H - 1);
+  const x0 = Math.floor(fx), y0 = Math.floor(fy), x1 = Math.min(x0 + 1, W - 1), y1 = Math.min(y0 + 1, H - 1);
+  const ax = fx - x0, ay = fy - y0;
+  const a = t[y0 * W + x0], b = t[y0 * W + x1], c = t[y1 * W + x0], d = t[y1 * W + x1];
+  return (a + (b - a) * ax) + ((c + (d - c) * ax) - (a + (b - a) * ax)) * ay;
+}
+function boxStats(t, m) {
+  const x0 = Math.min(m.x, m.x2), x1 = Math.max(m.x, m.x2), y0 = Math.min(m.y, m.y2), y1 = Math.max(m.y, m.y2);
+  let mn = Infinity, mx = -Infinity, s = 0, n = 0;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const cx = x + 0.5, cy = y + 0.5;
+    if (cx < x0 || cx > x1 || cy < y0 || cy > y1) continue;
+    const v = t[y * W + x]; if (v < mn) mn = v; if (v > mx) mx = v; s += v; n++;
+  }
+  if (!n) { const v = sampleAt(t, (x0 + x1) / 2, (y0 + y1) / 2); return { min: v, max: v, avg: v, n: 0 }; }
+  return { min: mn, max: mx, avg: s / n, n };
+}
+function measValue(t, m) { return m.kind === "point" ? sampleAt(t, m.x, m.y) : boxStats(t, m).avg; }
+
+function onFrame(pk) {
+  const now = performance.now();
+  if (S.lastArrive) {
+    const dt = now - S.lastArrive;
+    if (dt > 0) { const f = 1000 / dt; S.fpsEma = S.fpsEma ? S.fpsEma * 0.8 + f * 0.2 : f; }
+  }
+  S.lastArrive = now; S.frames++;
+  pk.stats = statsOf(pk.temps);
+  pk.time = now;
+  S.frame = pk;
+
+  // history
+  pushSeries("centre", "Centre", SLOT_CENTRE, now, pk.stats.centre);
+  pushSeries("max", "Max", SLOT_MAX, now, pk.stats.max);
+  pushSeries("min", "Min", SLOT_MIN, now, pk.stats.min);
+  for (const m of S.meas) pushSeries("m" + m.id, m.name, m.slot, now, measValue(pk.temps, m));
+
+  if (S.recRaw) { S.recRaw.push(new Float32Array(pk.temps)); }
+  bufferFrame(pk, now);
+  $("empty").classList.add("hidden");
+  $("cliHint").classList.add("hidden");
+  requestRender();
+}
+
+function pushSeries(key, name, slot, t, v) {
+  let s = S.series.get(key);
+  if (!s) { s = { name, slot, pts: [] }; S.series.set(key, s); }
+  s.name = name;
+  s.pts.push({ t, v });
+  const keep = t - 600000 - 5000; // 10 min max window
+  let drop = 0; while (drop < s.pts.length && s.pts[drop].t < keep) drop++;
+  if (drop) s.pts.splice(0, drop);
+}
+
+/* ==========================================================================
+ * Rendering
+ * ======================================================================== */
+let renderQueued = false;
+function requestRender() { if (!renderQueued) { renderQueued = true; requestAnimationFrame(() => { renderQueued = false; renderAll(); }); } }
+
+function displayFrame() { return S.frozen || S.frame; }
+
+function resolveRange(st) {
+  if (S.rangeMode === "manual") {
+    const lo = uToC(S.rMin), hi = uToC(S.rMax);
+    return hi > lo ? [lo, hi] : [lo, lo + 1];
+  }
+  let lo = st.min, hi = st.max;
+  if (S.rangeMode === "smooth" && !S.frozen) {
+    if (S.sLo == null) { S.sLo = lo; S.sHi = hi; }
+    else { S.sLo += (lo - S.sLo) * 0.15; S.sHi += (hi - S.sHi) * 0.15; }
+    lo = S.sLo; hi = S.sHi;
+  }
+  if (hi - lo < 1) { const m = (hi + lo) / 2; lo = m - 0.5; hi = m + 0.5; }
+  return [lo, hi];
+}
+
+// sensor <-> screen mapping, honouring mirror / flip
+function toScreen(x, y, cw, ch) {
+  const sx = S.mirror ? W - x : x, sy = S.flip ? H - y : y;
+  return [sx * cw / W, sy * ch / H];
+}
+function toSensor(px, py, cw, ch) {
+  let x = px * W / cw, y = py * H / ch;
+  if (S.mirror) x = W - x; if (S.flip) y = H - y;
+  return [Math.min(Math.max(x, 0), W), Math.min(Math.max(y, 0), H)];
+}
+
+const UPS = 8; // upsample factor before palette mapping: interpolate temperatures, not colours
+const hiCv = document.createElement("canvas"); hiCv.width = W * UPS; hiCv.height = H * UPS;
+const hiCtx = hiCv.getContext("2d");
+const hiImg = hiCtx.createImageData(W * UPS, H * UPS);
+const loCv = document.createElement("canvas"); loCv.width = W; loCv.height = H;
+const loCtx = loCv.getContext("2d");
+const loImg = loCtx.createImageData(W, H);
+
+function levelOf(v, rlo, span) { let n = (v - rlo) / span; n = n < 0 ? 0 : n > 1 ? 1 : n; return (n * 255 + 0.5) | 0; }
+
+function paintImage(f, rlo, rhi) {
+  const span = rhi - rlo, lut = S.lut, t = f.temps;
+  const iso = S.iso != null ? uToC(S.iso) : null;
+  const put = (d, o, v) => {
+    if (iso != null && v >= iso) { d[o] = 0; d[o + 1] = 255; d[o + 2] = 90; d[o + 3] = 255; return; }
+    const l = levelOf(v, rlo, span) * 3; d[o] = lut[l]; d[o + 1] = lut[l + 1]; d[o + 2] = lut[l + 2]; d[o + 3] = 255;
+  };
+  if (S.interp === "raw") {
+    const d = loImg.data;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const sx = S.mirror ? W - 1 - x : x, sy = S.flip ? H - 1 - y : y;
+      put(d, (y * W + x) * 4, t[sy * W + sx]);
+    }
+    loCtx.putImageData(loImg, 0, 0);
+    return loCv;
+  }
+  const d = hiImg.data, HW = W * UPS, HH = H * UPS;
+  for (let y = 0; y < HH; y++) {
+    const syy = (y + 0.5) / UPS, sy = S.flip ? H - syy : syy;
+    for (let x = 0; x < HW; x++) {
+      const sxx = (x + 0.5) / UPS, sx = S.mirror ? W - sxx : sxx;
+      put(d, (y * HW + x) * 4, sampleAt(t, sx, sy));
+    }
+  }
+  hiCtx.putImageData(hiImg, 0, 0);
+  return hiCv;
+}
+
+function fitCanvas(c) {
+  const r = c.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  const w = Math.max(1, Math.round(r.width * dpr)), h = Math.max(1, Math.round(r.height * dpr));
+  if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+  return [w, h, dpr];
+}
+
+let lastRange = [20, 40];
+function renderAll() {
+  const f = displayFrame();
+  renderHeader();
+  if (f) {
+    const [rlo, rhi] = resolveRange(f.stats);
+    lastRange = [rlo, rhi];
+    const src = paintImage(f, rlo, rhi);
+    const c = $("image"), [w, h] = fitCanvas(c), ctx = c.getContext("2d");
+    ctx.imageSmoothingEnabled = S.interp !== "raw";
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(src, 0, 0, w, h);
+    $("cbMin").textContent = fmt(rlo) + unitLabel();
+    $("cbMax").textContent = fmt(rhi) + unitLabel();
+    renderReadout(f);
+    renderMeasList(f);
+    drawHist(f, rlo, rhi);
+  }
+  drawOverlay();
+  drawTimeSeries();
+}
+
+function renderHeader() {
+  const f = S.frame;
+  const parts = [];
+  if (S.source) {
+    parts.push(`<b>${S.fpsEma ? S.fpsEma.toFixed(1) : "–"}</b> fps`);
+    parts.push(`<b>${S.frames}</b> frames`);
+    if (S.dropped) parts.push(`<b>${S.dropped}</b> dropped`);
+    if (S.crcErrors) parts.push(`<b>${S.crcErrors}</b> bad`);
+  }
+  $("hstats").innerHTML = parts.join(" · ");
+  if (f) {
+    $("imgInfo").textContent = `e ${(f.e / 100).toFixed(2)} · ${RATE_NAMES[f.rate] || "?"} · ${SPEED_NAMES[f.speed] || "?"} · ${f.flags & 1 ? "chess" : "interleave"}` + (S.frozen ? " · FROZEN" : "");
+  }
+}
+
+function renderReadout(f) {
+  const u = `<small>${unitLabel()}</small>`;
+  $("tMax").innerHTML = fmt(f.stats.max) + u;
+  $("tCtr").innerHTML = fmt(f.stats.centre) + u;
+  $("tMin").innerHTML = fmt(f.stats.min) + u;
+  $("tAmb").innerHTML = fmt(f.ta) + u;
+  $("unitNote").textContent = "centre = 21-pixel spot";
+}
+
+/* ---------------- overlay: markers, measurements, hover readout ---------------- */
+let hover = null; // {px, py} in CSS px
+function drawOverlay() {
+  const c = $("overlay"), [w, h, dpr] = fitCanvas(c), ctx = c.getContext("2d");
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  const f = displayFrame();
+  if (!f) return;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const cw = w / dpr, ch = h / dpr;
+  ctx.lineJoin = "round";
+
+  // centre crosshair (the Flipper's centre spot)
+  const [cx, cy] = toScreen(16.5, 12.5, cw, ch);
+  const r = (2.5 * cw / W);
+  ctx.strokeStyle = "rgba(0,0,0,.55)"; ctx.lineWidth = 4;
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+  ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+  crossAt(ctx, cx, cy, r + 6);
+
+  if (S.markers) {
+    const mk = (idx, up, label) => {
+      const [x, y] = toScreen((idx % W) + 0.5, Math.floor(idx / W) + 0.5, cw, ch);
+      triangle(ctx, x, y, up);
+      chip(ctx, x + 9, y - 9, label);
+    };
+    mk(f.stats.imax, true, fmt(f.stats.max));
+    mk(f.stats.imin, false, fmt(f.stats.min));
+  }
+
+  // measurements
+  for (const m of S.meas) {
+    const col = css(SERIES_SLOTS[m.slot]);
+    const sel = S.selected === m.id;
+    if (m.kind === "point") {
+      const [x, y] = toScreen(m.x, m.y, cw, ch);
+      ctx.lineWidth = 4; ctx.strokeStyle = "rgba(0,0,0,.6)"; ctx.beginPath(); ctx.arc(x, y, 7, 0, 7); ctx.stroke();
+      ctx.lineWidth = sel ? 3 : 2; ctx.strokeStyle = col; ctx.beginPath(); ctx.arc(x, y, 7, 0, 7); ctx.stroke();
+      ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(x, y, 1.6, 0, 7); ctx.fill();
+      chip(ctx, x + 11, y - 11, `${m.name}  ${fmt(sampleAt(f.temps, m.x, m.y))}`, col);
+    } else {
+      const [x1, y1] = toScreen(m.x, m.y, cw, ch), [x2, y2] = toScreen(m.x2, m.y2, cw, ch);
+      const bx = Math.min(x1, x2), by = Math.min(y1, y2), bw = Math.abs(x2 - x1), bh = Math.abs(y2 - y1);
+      ctx.lineWidth = 4; ctx.strokeStyle = "rgba(0,0,0,.6)"; ctx.strokeRect(bx, by, bw, bh);
+      ctx.lineWidth = sel ? 3 : 2; ctx.strokeStyle = col; ctx.strokeRect(bx, by, bw, bh);
+      const s = boxStats(f.temps, m);
+      chip(ctx, bx + 2, by - 11, `${m.name}  avg ${fmt(s.avg)}  max ${fmt(s.max)}`, col);
+    }
+  }
+
+  // drag preview
+  if (drag && drag.kind === "newbox") {
+    const [x1, y1] = toScreen(drag.x, drag.y, cw, ch), [x2, y2] = toScreen(drag.x2, drag.y2, cw, ch);
+    ctx.setLineDash([5, 4]); ctx.lineWidth = 1.5; ctx.strokeStyle = "#fff";
+    ctx.strokeRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1));
+    ctx.setLineDash([]);
+  }
+
+  // hover readout
+  if (hover) {
+    const [sx, sy] = toSensor(hover.px, hover.py, cw, ch);
+    const v = sampleAt(f.temps, sx, sy);
+    chip(ctx, Math.min(hover.px + 14, cw - 70), Math.min(hover.py + 18, ch - 10), `${fmt(v)} ${unitLabel()}`);
+  }
+}
+function crossAt(ctx, x, y, s) {
+  for (const [lw, col] of [[4, "rgba(0,0,0,.55)"], [1.5, "#fff"]]) {
+    ctx.lineWidth = lw; ctx.strokeStyle = col; ctx.beginPath();
+    ctx.moveTo(x - s, y); ctx.lineTo(x - s + 4, y); ctx.moveTo(x + s, y); ctx.lineTo(x + s - 4, y);
+    ctx.moveTo(x, y - s); ctx.lineTo(x, y - s + 4); ctx.moveTo(x, y + s); ctx.lineTo(x, y + s - 4);
+    ctx.stroke();
+  }
+}
+function triangle(ctx, x, y, up) {
+  ctx.beginPath();
+  if (up) { ctx.moveTo(x, y - 7); ctx.lineTo(x + 6, y + 4); ctx.lineTo(x - 6, y + 4); }
+  else { ctx.moveTo(x, y + 7); ctx.lineTo(x + 6, y - 4); ctx.lineTo(x - 6, y - 4); }
+  ctx.closePath();
+  ctx.lineWidth = 3; ctx.strokeStyle = "rgba(0,0,0,.7)"; ctx.stroke();
+  ctx.fillStyle = "#fff"; ctx.fill();
+}
+function chip(ctx, x, y, text, keyColor) {
+  ctx.font = "600 12px system-ui, sans-serif";
+  const tw = ctx.measureText(text).width, pad = 5, kw = keyColor ? 12 : 0;
+  const cw = ctx.canvas.width / (window.devicePixelRatio || 1);
+  x = Math.max(2, Math.min(x, cw - tw - pad * 2 - kw - 2)); y = Math.max(10, y);
+  ctx.fillStyle = "rgba(16,16,15,.82)";
+  roundRect(ctx, x, y - 9, tw + pad * 2 + kw, 18, 5); ctx.fill();
+  if (keyColor) { ctx.fillStyle = keyColor; ctx.fillRect(x + pad, y - 1, 8, 2); }
+  ctx.fillStyle = "#fff"; ctx.textBaseline = "middle"; ctx.fillText(text, x + pad + kw, y + 0.5);
+}
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+}
+
+function drawColorbar() {
+  const c = $("colorbar"), ctx = c.getContext("2d"), img = ctx.createImageData(c.width, 1);
+  for (let x = 0; x < c.width; x++) {
+    const l = Math.round(x / (c.width - 1) * 255) * 3;
+    img.data[x * 4] = S.lut[l]; img.data[x * 4 + 1] = S.lut[l + 1]; img.data[x * 4 + 2] = S.lut[l + 2]; img.data[x * 4 + 3] = 255;
+  }
+  for (let y = 0; y < c.height; y++) ctx.putImageData(img, 0, y);
+}
+
+/* ---------------- measurement list ---------------- */
+function renderMeasList(f) {
+  const box = $("mlist");
+  if (!S.meas.length) {
+    if (!box.dataset.empty) { box.innerHTML = '<div class="muted">Click the image to add a point, or drag to draw a box. Up to 5.</div>'; box.dataset.empty = "1"; }
+    return;
+  }
+  delete box.dataset.empty;
+  // rebuild rows only when the set changes; values update in place
+  const sig = S.meas.map(m => m.id + m.kind).join(",") + "|" + S.selected;
+  if (box.dataset.sig !== sig) {
+    box.textContent = "";
+    for (const m of S.meas) {
+      const row = document.createElement("div"); row.className = "m" + (S.selected === m.id ? " sel" : "");
+      const sw = document.createElement("span"); sw.className = "sw"; sw.style.background = `var(${SERIES_SLOTS[m.slot]})`;
+      const n = document.createElement("span"); n.className = "n"; n.textContent = m.name;
+      const v = document.createElement("span"); v.className = "vals num"; v.id = "mv" + m.id;
+      const del = document.createElement("button"); del.textContent = "✕"; del.title = "Remove " + m.name;
+      del.setAttribute("aria-label", "Remove " + m.name);
+      del.onclick = (e) => { e.stopPropagation(); removeMeas(m.id); };
+      row.onclick = () => { S.selected = m.id; requestRender(); };
+      row.append(sw, n, v, del); box.append(row);
+    }
+    box.dataset.sig = sig;
+  }
+  for (const m of S.meas) {
+    const el = $("mv" + m.id); if (!el) continue;
+    if (m.kind === "point") el.innerHTML = `<b>${fmt(sampleAt(f.temps, m.x, m.y))}</b> ${unitLabel()} · point`;
+    else { const s = boxStats(f.temps, m); el.innerHTML = `avg <b>${fmt(s.avg)}</b> · max ${fmt(s.max)} · min ${fmt(s.min)}`; }
+  }
+}
+function freeSlot() {
+  for (let s = 3; s < 8; s++) if (!S.meas.some(m => m.slot === s)) return s;
+  return -1;
+}
+function addMeas(m) {
+  const slot = freeSlot(); if (slot < 0) { flash("Up to 5 measurements"); return null; }
+  m.id = S.nextId++; m.slot = slot;
+  m.name = (m.kind === "point" ? "P" : "B") + (S.meas.filter(x => x.kind === m.kind).length + 1);
+  while (S.meas.some(x => x.name === m.name)) m.name = m.name[0] + (parseInt(m.name.slice(1)) + 1);
+  S.meas.push(m); S.selected = m.id;
+  if (S.frame) pushSeries("m" + m.id, m.name, m.slot, performance.now(), measValue(S.frame.temps, m));
+  requestRender(); return m;
+}
+function removeMeas(id) {
+  S.meas = S.meas.filter(m => m.id !== id); S.series.delete("m" + id);
+  if (S.selected === id) S.selected = null;
+  requestRender();
+}
+function flash(msg) { $("imgInfo").textContent = msg; }
+
+/* ---------------- time series ---------------- */
+let tsGeom = null;
+function drawTimeSeries() {
+  const c = $("ts"), [w, h, dpr] = fitCanvas(c), ctx = c.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const cw = w / dpr, ch = h / dpr;
+  ctx.clearRect(0, 0, cw, ch);
+  const now = (S.frozen ? S.frozen.time : performance.now());
+  const t0 = now - S.winSec * 1000;
+  const series = [...S.series.entries()];
+  let vmin = Infinity, vmax = -Infinity;
+  for (const [, s] of series) for (const p of s.pts) if (p.t >= t0 && isFinite(p.v)) { if (p.v < vmin) vmin = p.v; if (p.v > vmax) vmax = p.v; }
+  const L = 44, R = series.length <= 4 ? 84 : 12, T = 8, B = 22;
+  const pw = cw - L - R, ph = ch - T - B;
+  ctx.font = "11px system-ui, sans-serif"; ctx.textBaseline = "middle";
+  if (!isFinite(vmin)) {
+    ctx.fillStyle = css("--text-muted"); ctx.textAlign = "center";
+    ctx.fillText("Waiting for data", cw / 2, ch / 2); tsGeom = null; renderLegend([]); return;
+  }
+  vmin = cToU(vmin); vmax = cToU(vmax);
+  if (vmax - vmin < 2) { const m = (vmax + vmin) / 2; vmin = m - 1; vmax = m + 1; }
+  const [y0, y1, step] = niceScale(vmin, vmax, 5);
+  const X = (t) => L + (t - t0) / (now - t0) * pw;
+  const Y = (v) => T + (1 - (v - y0) / (y1 - y0)) * ph;
+
+  // grid + y axis labels
+  ctx.strokeStyle = css("--grid"); ctx.lineWidth = 1; ctx.fillStyle = css("--text-muted"); ctx.textAlign = "right";
+  for (let v = y0; v <= y1 + 1e-9; v += step) {
+    const y = Math.round(Y(v)) + 0.5;
+    ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(L + pw, y); ctx.stroke();
+    ctx.fillText(v.toFixed(step < 1 ? 1 : 0), L - 6, y);
+  }
+  ctx.textAlign = "left"; ctx.fillText(unitLabel(), 4, T + 2);
+  // x labels: seconds ago
+  ctx.textAlign = "center";
+  const xs = S.winSec <= 60 ? 10 : S.winSec <= 300 ? 60 : 120;
+  for (let s = 0; s <= S.winSec; s += xs) {
+    const x = X(now - s * 1000);
+    ctx.fillText(s === 0 ? "now" : (s >= 60 ? (s / 60) + "m" : s + "s"), x, ch - 8);
+  }
+  ctx.strokeStyle = css("--axis"); ctx.beginPath(); ctx.moveTo(L, T + ph + 0.5); ctx.lineTo(L + pw, T + ph + 0.5); ctx.stroke();
+
+  // lines
+  ctx.save(); ctx.beginPath(); ctx.rect(L, T - 2, pw, ph + 4); ctx.clip();
+  const ends = [];
+  for (const [key, s] of series) {
+    const col = css(SERIES_SLOTS[s.slot]);
+    ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.lineJoin = "round"; ctx.beginPath();
+    let started = false, last = null;
+    for (const p of s.pts) {
+      if (p.t < t0 - 2000 || !isFinite(p.v)) continue;
+      const x = X(p.t), y = Y(cToU(p.v));
+      if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+      last = { x, y, v: p.v };
+    }
+    ctx.stroke();
+    if (last) ends.push({ key, name: s.name, col, ...last });
+  }
+  ctx.restore();
+
+  // direct labels at line ends (<= 4 series), nudged apart
+  if (ends.length <= 4) {
+    ends.sort((a, b) => a.y - b.y);
+    for (let i = 1; i < ends.length; i++) if (ends[i].y - ends[i - 1].y < 14) ends[i].y = ends[i - 1].y + 14;
+    ctx.textAlign = "left"; ctx.font = "600 11px system-ui, sans-serif";
+    for (const e of ends) { ctx.fillStyle = css("--text-secondary"); ctx.fillText(`${e.name} ${fmt(e.v)}`, L + pw + 6, e.y); }
+  }
+
+  // crosshair
+  if (tsHover != null && tsHover >= L && tsHover <= L + pw) {
+    ctx.strokeStyle = css("--text-muted"); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(Math.round(tsHover) + 0.5, T); ctx.lineTo(Math.round(tsHover) + 0.5, T + ph); ctx.stroke();
+  }
+  tsGeom = { L, pw, t0, now, series };
+  renderLegend(series);
+}
+function niceScale(a, b, n) {
+  const raw = (b - a) / n, mag = Math.pow(10, Math.floor(Math.log10(raw))), r = raw / mag;
+  const step = (r < 1.5 ? 1 : r < 3 ? 2 : r < 7 ? 5 : 10) * mag;
+  return [Math.floor(a / step) * step, Math.ceil(b / step) * step, step];
+}
+let legendSig = "";
+function renderLegend(series) {
+  const sig = series.map(([k, s]) => k + s.name + s.slot).join("|");
+  if (sig === legendSig) return; legendSig = sig;
+  const box = $("tsLegend"); box.textContent = "";
+  for (const [, s] of series) {
+    const sp = document.createElement("span");
+    const k = document.createElement("span"); k.className = "key"; k.style.background = `var(${SERIES_SLOTS[s.slot]})`;
+    sp.append(k, document.createTextNode(s.name)); box.append(sp);
+  }
+}
+let tsHover = null;
+$("ts").addEventListener("pointermove", (e) => {
+  const r = e.currentTarget.getBoundingClientRect(); tsHover = e.clientX - r.left; requestRender();
+  if (!tsGeom) return hideTip();
+  const { L, pw, t0, now, series } = tsGeom;
+  if (tsHover < L || tsHover > L + pw) return hideTip();
+  const t = t0 + (tsHover - L) / pw * (now - t0);
+  const rows = [];
+  for (const [, s] of series) {
+    let best = null; for (const p of s.pts) { if (!best || Math.abs(p.t - t) < Math.abs(best.t - t)) best = p; }
+    if (best && Math.abs(best.t - t) < 3000) rows.push({ name: s.name, v: best.v, col: `var(${SERIES_SLOTS[s.slot]})` });
+  }
+  const ago = Math.max(0, (now - t) / 1000);
+  if (!rows.length) return hideTip();
+  showTip(e.clientX, e.clientY, ago < 0.5 ? "now" : ago.toFixed(1) + " s ago", rows.map(r => [r.col, fmt(r.v) + " " + unitLabel(), r.name]));
+});
+$("ts").addEventListener("pointerleave", () => { tsHover = null; hideTip(); requestRender(); });
+
+/* ---------------- histogram ---------------- */
+const NBINS = 32;
+let histGeom = null;
+function drawHist(f, rlo, rhi) {
+  const c = $("hist"), [w, h, dpr] = fitCanvas(c), ctx = c.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const cw = w / dpr, ch = h / dpr;
+  ctx.clearRect(0, 0, cw, ch);
+  const bins = new Array(NBINS).fill(0), span = (rhi - rlo) || 1;
+  for (let i = 0; i < NPIX; i++) { let b = Math.floor((f.temps[i] - rlo) / span * NBINS); b = b < 0 ? 0 : b >= NBINS ? NBINS - 1 : b; bins[b]++; }
+  const L = 8, R = 8, T = 8, B = 28, pw = cw - L - R, ph = ch - T - B;
+  const peak = Math.max(...bins, 1);
+  const bw = pw / NBINS;
+  // Bars share one neutral ink so the cold end of dark palettes never
+  // disappears into the background; the palette strip below ties each bin to
+  // the image colours.
+  const ink = css("--text-secondary");
+  for (let i = 0; i < NBINS; i++) {
+    const bh = bins[i] / peak * ph; if (bh <= 0) continue;
+    const x = L + i * bw, y = T + ph - bh;
+    const gap = bw > 6 ? 2 : 1;
+    ctx.fillStyle = ink; ctx.globalAlpha = histHover === i ? 1 : 0.7;
+    roundTop(ctx, x + gap / 2, y, Math.max(1, bw - gap), Math.max(bh, 1), Math.min(4, (bw - gap) / 2));
+    ctx.globalAlpha = 1;
+  }
+  for (let i = 0; i < NBINS; i++) {
+    const lvl = Math.round((i + 0.5) / NBINS * 255) * 3;
+    ctx.fillStyle = `rgb(${S.lut[lvl]},${S.lut[lvl + 1]},${S.lut[lvl + 2]})`;
+    ctx.fillRect(L + i * bw, T + ph + 2, bw + 0.5, 5);
+  }
+  ctx.fillStyle = css("--text-muted"); ctx.font = "11px system-ui, sans-serif"; ctx.textBaseline = "middle";
+  ctx.textAlign = "left"; ctx.fillText(fmt(rlo), L, ch - 8);
+  ctx.textAlign = "right"; ctx.fillText(fmt(rhi) + " " + unitLabel(), L + pw, ch - 8);
+  histGeom = { L, bw, bins, rlo, span };
+}
+function roundTop(ctx, x, y, w, h, r) {
+  r = Math.max(0, Math.min(r, h));
+  ctx.beginPath(); ctx.moveTo(x, y + h); ctx.lineTo(x, y + r); ctx.arcTo(x, y, x + r, y, r);
+  ctx.lineTo(x + w - r, y); ctx.arcTo(x + w, y, x + w, y + r, r); ctx.lineTo(x + w, y + h); ctx.closePath(); ctx.fill();
+}
+let histHover = null;
+$("hist").addEventListener("pointermove", (e) => {
+  if (!histGeom) return;
+  const r = e.currentTarget.getBoundingClientRect(), x = e.clientX - r.left;
+  const i = Math.floor((x - histGeom.L) / histGeom.bw);
+  if (i < 0 || i >= NBINS) { histHover = null; hideTip(); requestRender(); return; }
+  histHover = i;
+  const a = histGeom.rlo + i / NBINS * histGeom.span, b = histGeom.rlo + (i + 1) / NBINS * histGeom.span;
+  showTip(e.clientX, e.clientY, `${fmt(a)} – ${fmt(b)} ${unitLabel()}`, [[null, String(histGeom.bins[i]), "pixels"]]);
+  requestRender();
+});
+$("hist").addEventListener("pointerleave", () => { histHover = null; hideTip(); requestRender(); });
+
+/* ---------------- tooltip ---------------- */
+function showTip(x, y, title, rows) {
+  const tip = $("tip"); tip.textContent = "";
+  const t = document.createElement("div"); t.className = "t"; t.textContent = title; tip.append(t);
+  for (const [col, val, lbl] of rows) {
+    const r = document.createElement("div"); r.className = "r";
+    const k = document.createElement("span"); k.className = "key"; if (col) k.style.background = col;
+    const b = document.createElement("b"); b.className = "num"; b.textContent = val;
+    const l = document.createElement("span"); l.className = "lbl"; l.textContent = lbl;
+    r.append(k, b, l); tip.append(r);
+  }
+  tip.classList.remove("hidden");
+  const tw = tip.offsetWidth, th = tip.offsetHeight;
+  tip.style.left = Math.min(x + 14, innerWidth - tw - 8) + "px";
+  tip.style.top = Math.min(y + 14, innerHeight - th - 8) + "px";
+}
+function hideTip() { $("tip").classList.add("hidden"); }
+
+/* ---------------- table views (the non-hover path to every value) ---------------- */
+function renderTables() {
+  const f = displayFrame();
+  const tsBox = $("tsTable"), hBox = $("histTable");
+  if ($("tsTable").closest("details").open) {
+    const tbl = document.createElement("table");
+    const hr = tbl.insertRow(); ["Series", "Now", "Min (window)", "Max (window)"].forEach(h => { const th = document.createElement("th"); th.textContent = h; hr.append(th); });
+    const now = performance.now(), t0 = now - S.winSec * 1000;
+    for (const [, s] of S.series) {
+      const vals = s.pts.filter(p => p.t >= t0 && isFinite(p.v)).map(p => p.v); if (!vals.length) continue;
+      const r = tbl.insertRow();
+      [s.name, fmt(vals[vals.length - 1]), fmt(Math.min(...vals)), fmt(Math.max(...vals))].forEach(v => { const td = r.insertCell(); td.textContent = v; });
+    }
+    tsBox.replaceChildren(tbl);
+  }
+  if (f && histGeom && hBox.closest("details").open) {
+    const tbl = document.createElement("table");
+    const hr = tbl.insertRow(); ["From", "To", "Pixels"].forEach(h => { const th = document.createElement("th"); th.textContent = h; hr.append(th); });
+    histGeom.bins.forEach((n, i) => {
+      if (!n) return; const r = tbl.insertRow();
+      [fmt(histGeom.rlo + i / NBINS * histGeom.span), fmt(histGeom.rlo + (i + 1) / NBINS * histGeom.span), String(n)].forEach(v => { const td = r.insertCell(); td.textContent = v; });
+    });
+    hBox.replaceChildren(tbl);
+  }
+}
+setInterval(renderTables, 1000);
+
+/* ==========================================================================
+ * Image interaction
+ * ======================================================================== */
+let drag = null;
+function hitTest(sx, sy) {
+  for (let i = S.meas.length - 1; i >= 0; i--) {
+    const m = S.meas[i];
+    if (m.kind === "point" && Math.hypot(m.x - sx, m.y - sy) < 1.2) return m;
+    if (m.kind === "box") {
+      const x0 = Math.min(m.x, m.x2), x1 = Math.max(m.x, m.x2), y0 = Math.min(m.y, m.y2), y1 = Math.max(m.y, m.y2);
+      if (sx >= x0 - .6 && sx <= x1 + .6 && sy >= y0 - .6 && sy <= y1 + .6) return m;
+    }
+  }
+  return null;
+}
+const ov = $("overlay");
+ov.addEventListener("pointerdown", (e) => {
+  if (!displayFrame()) return;
+  const r = ov.getBoundingClientRect(), [sx, sy] = toSensor(e.clientX - r.left, e.clientY - r.top, r.width, r.height);
+  ov.setPointerCapture(e.pointerId);
+  const hit = hitTest(sx, sy);
+  if (hit) { S.selected = hit.id; drag = { kind: "move", m: hit, ox: sx, oy: sy, sx0: hit.x, sy0: hit.y, sx2: hit.x2, sy2: hit.y2 }; }
+  else if (S.tool === "point" || S.tool === "box") drag = { kind: "newbox", x: sx, y: sy, x2: sx, y2: sy, moved: false };
+  requestRender();
+});
+ov.addEventListener("pointermove", (e) => {
+  const r = ov.getBoundingClientRect(); hover = { px: e.clientX - r.left, py: e.clientY - r.top };
+  if (drag) {
+    const [sx, sy] = toSensor(hover.px, hover.py, r.width, r.height);
+    if (drag.kind === "move") {
+      const dx = sx - drag.ox, dy = sy - drag.oy, m = drag.m;
+      m.x = clamp(drag.sx0 + dx, 0, W); m.y = clamp(drag.sy0 + dy, 0, H);
+      if (m.kind === "box") { m.x2 = clamp(drag.sx2 + dx, 0, W); m.y2 = clamp(drag.sy2 + dy, 0, H); }
+    } else { drag.x2 = sx; drag.y2 = sy; if (Math.hypot(sx - drag.x, sy - drag.y) > 0.8) drag.moved = true; }
+  }
+  requestRender();
+});
+ov.addEventListener("pointerup", () => {
+  if (drag && drag.kind === "newbox") {
+    if (drag.moved && (S.tool === "box" || S.tool === "point")) addMeas({ kind: "box", x: drag.x, y: drag.y, x2: drag.x2, y2: drag.y2 });
+    else if (S.tool === "point") addMeas({ kind: "point", x: drag.x, y: drag.y });
+  }
+  drag = null; requestRender();
+});
+ov.addEventListener("pointerleave", () => { hover = null; requestRender(); });
+ov.addEventListener("keydown", (e) => {
+  if ((e.key === "Delete" || e.key === "Backspace") && S.selected != null) { removeMeas(S.selected); e.preventDefault(); }
+});
+const clamp = (v, a, b) => Math.min(Math.max(v, a), b);
+
+/* ==========================================================================
+ * Controls
+ * ======================================================================== */
+function segment(attr, onPick) {
+  document.querySelectorAll(`[data-${attr}]`).forEach(b => b.addEventListener("click", () => {
+    document.querySelectorAll(`[data-${attr}]`).forEach(x => x.classList.toggle("active", x === b));
+    onPick(b.dataset[attr]); requestRender();
+  }));
+}
+segment("tool", v => { S.tool = v; });
+segment("range", v => { S.rangeMode = v; S.sLo = S.sHi = null; $("manualRow").classList.toggle("hidden", v !== "manual"); });
+segment("unit", v => {
+  const was = S.unit;
+  // keep manual range and isotherm meaning the same temperature
+  const rmin = uToCWith(was, S.rMin), rmax = uToCWith(was, S.rMax), iso = S.iso != null ? uToCWith(was, S.iso) : null;
+  S.unit = v;
+  S.rMin = +cToU(rmin).toFixed(1); S.rMax = +cToU(rmax).toFixed(1); $("rMin").value = S.rMin; $("rMax").value = S.rMax;
+  if (iso != null) { S.iso = +cToU(iso).toFixed(1); $("isoIn").value = S.iso; }
+  $("isoUnit").textContent = unitLabel(); legendSig = "";
+});
+function uToCWith(unit, u) { return unit === "F" ? (u - 32) * 5 / 9 : u; }
+segment("interp", v => { S.interp = v; });
+$("manualRow").classList.add("hidden");
+$("palSel").onchange = (e) => setPalette(e.target.value);
+$("rMin").oninput = (e) => { S.rMin = parseFloat(e.target.value) || 0; requestRender(); };
+$("rMax").oninput = (e) => { S.rMax = parseFloat(e.target.value) || 0; requestRender(); };
+$("btnMirror").onclick = (e) => { S.mirror = !S.mirror; e.target.classList.toggle("active", S.mirror); requestRender(); };
+$("btnFlip").onclick = (e) => { S.flip = !S.flip; e.target.classList.toggle("active", S.flip); requestRender(); };
+$("chkMarkers").onchange = (e) => { S.markers = e.target.checked; requestRender(); };
+$("isoIn").oninput = (e) => { const v = parseFloat(e.target.value); S.iso = isFinite(v) ? v : null; requestRender(); };
+$("winSel").onchange = (e) => { S.winSec = +e.target.value; requestRender(); };
+$("btnClear").onclick = () => { S.meas.slice().forEach(m => removeMeas(m.id)); };
+$("btnFreeze").onclick = (e) => {
+  S.frozen = S.frozen ? null : S.frame;
+  e.target.classList.toggle("active", !!S.frozen); e.target.textContent = S.frozen ? "Frozen" : "Freeze"; requestRender();
+};
+$("btnTheme").onclick = () => {
+  const root = document.documentElement;
+  const dark = root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+  root.dataset.theme = dark ? "light" : "dark"; legendSig = ""; requestRender();
+};
+addEventListener("resize", requestRender);
+
+// device controls -> commands
+let emisTimer = 0;
+$("emis").oninput = (e) => {
+  $("emisV").textContent = (e.target.value / 100).toFixed(2);
+  clearTimeout(emisTimer); emisTimer = setTimeout(() => send("E" + e.target.value), 150);
+};
+$("rateSel").onchange = (e) => send("R" + e.target.value);
+$("speedSel").onchange = (e) => send("S" + e.target.value);
+$("modeSel").onchange = (e) => send("C" + e.target.value);
+$("btnDevCap").onclick = () => send("K");
+$("btnDevGraph").onclick = () => send("G");
+$("btnDevRec").onclick = () => send(S.dev && S.dev.rec === "1" ? "V0" : "V1");
+
+/* ==========================================================================
+ * Saving
+ * ======================================================================== */
+function stamp() { const d = new Date(), p = (n) => String(n).padStart(2, "0"); return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`; }
+function download(blob, name) { const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000); }
+
+function composite() {
+  const img = $("image"), ovc = $("overlay");
+  const pad = 16, barH = 18, w = img.width, h = img.height;
+  const c = document.createElement("canvas"); c.width = w + pad * 2; c.height = h + pad * 3 + barH + 22;
+  const ctx = c.getContext("2d");
+  ctx.fillStyle = "#111110"; ctx.fillRect(0, 0, c.width, c.height);
+  ctx.drawImage(img, pad, pad); ctx.drawImage(ovc, pad, pad);
+  const bar = $("colorbar"); ctx.imageSmoothingEnabled = true; ctx.drawImage(bar, pad + 60, h + pad * 2, w - 120, barH);
+  ctx.fillStyle = "#fff"; ctx.font = "600 14px system-ui, sans-serif"; ctx.textBaseline = "middle";
+  ctx.textAlign = "left"; ctx.fillText($("cbMin").textContent, pad, h + pad * 2 + barH / 2);
+  ctx.textAlign = "right"; ctx.fillText($("cbMax").textContent, w + pad, h + pad * 2 + barH / 2);
+  const f = displayFrame();
+  if (f) {
+    ctx.textAlign = "left"; ctx.font = "13px system-ui, sans-serif"; ctx.fillStyle = "#c9c8c0";
+    ctx.fillText(`max ${fmt(f.stats.max)}  centre ${fmt(f.stats.centre)}  min ${fmt(f.stats.min)} ${unitLabel()}   e=${(f.e / 100).toFixed(2)}   ${new Date().toLocaleString()}`, pad, c.height - 16);
+  }
+  return c;
+}
+$("btnPng").onclick = () => { if (!displayFrame()) return; composite().toBlob(b => download(b, `IR_${stamp()}.png`), "image/png"); };
+$("btnCsv").onclick = () => {
+  const f = displayFrame(); if (!f) return;
+  let s = `# Thermal Camera ${stamp()}  unit=C  emissivity=${(f.e / 100).toFixed(2)}  ambient=${f.ta.toFixed(2)}\n`;
+  for (let y = 0; y < H; y++) { const row = []; for (let x = 0; x < W; x++) row.push(f.temps[y * W + x].toFixed(2)); s += row.join(",") + "\n"; }
+  download(new Blob([s], { type: "text/csv" }), `IR_${stamp()}.csv`);
+};
+$("btnRecRaw").onclick = (e) => {
+  if (!S.recRaw) { S.recRaw = []; e.target.classList.add("active"); e.target.textContent = "Stop raw"; recTick(); return; }
+  const frames = S.recRaw; S.recRaw = null; e.target.classList.remove("active"); e.target.textContent = "Record raw";
+  const out = new Float32Array(frames.length * NPIX); frames.forEach((f, i) => out.set(f, i * NPIX));
+  // little-endian on every platform the browser runs on; force it anyway
+  const dv = new DataView(out.buffer); for (let i = 0; i < out.length; i++) dv.setFloat32(i * 4, out[i], true);
+  if (frames.length) download(new Blob([out.buffer]), `REC_${stamp()}_frames.bin`);
+  recTick();
+};
+$("btnRecVid").onclick = (e) => {
+  if (S.recVid) { S.recVid.stop(); return; }
+  if (!window.MediaRecorder) { flash("Video recording not supported in this browser"); return; }
+  const cap = composite(), cctx = cap.getContext("2d");
+  const stream = cap.captureStream(15);
+  const mime = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"].find(t => MediaRecorder.isTypeSupported(t)) || "";
+  const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : {});
+  const chunks = [];
+  rec.ondataavailable = (ev) => ev.data.size && chunks.push(ev.data);
+  const iv = setInterval(() => { const c = composite(); cctx.drawImage(c, 0, 0); }, 1000 / 15);
+  rec.onstop = () => { clearInterval(iv); S.recVid = null; e.target.classList.remove("active"); e.target.textContent = "Record video"; download(new Blob(chunks, { type: "video/webm" }), `IR_${stamp()}.webm`); recTick(); };
+  rec.start(500); S.recVid = rec; S.recVidStart = performance.now();
+  e.target.classList.add("active"); e.target.textContent = "Stop video"; recTick();
+};
+function recTick() {
+  const parts = [];
+  if (S.recRaw) parts.push(`${S.recRaw.length} raw frames`);
+  if (S.recVid) parts.push(`video ${((performance.now() - S.recVidStart) / 1000).toFixed(0)} s`);
+  $("recInfo").textContent = parts.join(" · ");
+  if (S.recRaw || S.recVid) setTimeout(recTick, 250);
+}
+
+/* ==========================================================================
+ * Replay buffer: "save the last N seconds"
+ * ======================================================================== */
+function bufferFrame(pk, now) {
+  S.buf.push({ time: now, wall: Date.now(), temps: pk.temps, stats: pk.stats, e: pk.e, ta: pk.ta });
+  const keep = now - BUF_SEC * 1000;
+  let drop = 0; while (drop < S.buf.length && S.buf[drop].time < keep) drop++;
+  if (S.buf.length - drop > BUF_MAX_FRAMES) drop = S.buf.length - BUF_MAX_FRAMES;
+  if (drop) S.buf.splice(0, drop);
+}
+function lastFrames() {
+  if (!S.buf.length) { flash("Nothing recorded yet"); return null; }
+  const end = S.buf[S.buf.length - 1].time, from = end - (+$("lastSel").value) * 1000;
+  return S.buf.filter(f => f.time >= from);
+}
+function renderBufInfo() {
+  if (!S.buf.length) { $("bufInfo").textContent = ""; return; }
+  const secs = (S.buf[S.buf.length - 1].time - S.buf[0].time) / 1000;
+  $("bufInfo").textContent = `${S.buf.length} frames · ${secs.toFixed(0)} s kept`;
+}
+setInterval(renderBufInfo, 1000);
+const isoTime = (ms) => new Date(ms).toISOString();
+const unitCsv = () => (S.unit === "F" ? "F" : "C");
+const csvNum = (c) => cToU(c).toFixed(2);
+
+$("btnLastReadings").onclick = () => {
+  const fr = lastFrames(); if (!fr) return;
+  const t0 = fr[0].time, u = unitCsv();
+  const head = ["time", "seconds", `max_${u}`, `centre_${u}`, `min_${u}`, ...S.meas.map(m => `${m.name}_${u}`)];
+  const rows = [head.join(",")];
+  for (const f of fr) {
+    rows.push([isoTime(f.wall), ((f.time - t0) / 1000).toFixed(3), csvNum(f.stats.max), csvNum(f.stats.centre), csvNum(f.stats.min),
+      ...S.meas.map(m => csvNum(measValue(f.temps, m)))].join(","));
+  }
+  download(new Blob([rows.join("\n") + "\n"], { type: "text/csv" }), `READINGS_${stamp()}.csv`);
+};
+$("btnLastFrames").onclick = () => {
+  const fr = lastFrames(); if (!fr) return;
+  const u = unitCsv(), head = ["time", "emissivity"];
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) head.push(`r${y}c${x}_${u}`);
+  const rows = [head.join(",")];
+  for (const f of fr) {
+    const r = [isoTime(f.wall), (f.e / 100).toFixed(2)];
+    for (let i = 0; i < NPIX; i++) r.push(csvNum(f.temps[i]));
+    rows.push(r.join(","));
+  }
+  download(new Blob([rows.join("\n") + "\n"], { type: "text/csv" }), `FRAMES_${stamp()}.csv`);
+};
+$("btnLastRaw").onclick = () => {
+  const fr = lastFrames(); if (!fr) return;
+  const out = new ArrayBuffer(fr.length * NPIX * 4), dv = new DataView(out);
+  fr.forEach((f, i) => { for (let k = 0; k < NPIX; k++) dv.setFloat32((i * NPIX + k) * 4, f.temps[k], true); });
+  download(new Blob([out]), `REC_${stamp()}_frames.bin`);
+};
+
+/* Video of buffered frames: replayed onto an off-screen canvas at their
+ * original pace (MediaRecorder timestamps are wall-clock), so rendering takes
+ * as long as the clip. Colour range is fixed over the clip so it never pumps. */
+$("btnLastVid").onclick = (e) => {
+  if (S.lastVid) { S.lastVid.cancel(); return; }
+  const fr = lastFrames(); if (!fr || fr.length < 2) { if (fr) flash("Need at least 2 frames"); return; }
+  if (!window.MediaRecorder) { flash("Video recording not supported in this browser"); return; }
+  let lo = Infinity, hi = -Infinity;
+  if (S.rangeMode === "manual") { lo = uToC(S.rMin); hi = uToC(S.rMax); }
+  else for (const f of fr) { lo = Math.min(lo, f.stats.min); hi = Math.max(hi, f.stats.max); }
+  if (hi - lo < 1) { const m = (hi + lo) / 2; lo = m - 0.5; hi = m + 0.5; }
+
+  const c = document.createElement("canvas"); c.width = 640; c.height = 520;
+  const ctx = c.getContext("2d");
+  const drawFrame = (f) => {
+    ctx.fillStyle = "#111110"; ctx.fillRect(0, 0, c.width, c.height);
+    ctx.imageSmoothingEnabled = S.interp !== "raw";
+    ctx.drawImage(paintImage(f, lo, hi), 0, 0, 640, 480);
+    ctx.fillStyle = "#fff"; ctx.font = "600 15px system-ui, sans-serif"; ctx.textBaseline = "middle";
+    ctx.fillText(`max ${fmt(f.stats.max)}  centre ${fmt(f.stats.centre)}  min ${fmt(f.stats.min)} ${unitLabel()}`, 10, 500);
+    ctx.textAlign = "right"; ctx.fillText(new Date(f.wall).toLocaleTimeString(), 630, 500); ctx.textAlign = "left";
+  };
+  drawFrame(fr[0]);
+  const stream = c.captureStream(30);
+  const mime = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"].find(t => MediaRecorder.isTypeSupported(t)) || "";
+  const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : {});
+  const chunks = []; let i = 0, timer = 0, cancelled = false;
+  rec.ondataavailable = (ev) => ev.data.size && chunks.push(ev.data);
+  const done = () => { S.lastVid = null; e.target.classList.remove("active"); e.target.textContent = "Video"; };
+  rec.onstop = () => { done(); if (!cancelled) download(new Blob(chunks, { type: "video/webm" }), `CLIP_${stamp()}.webm`); };
+  const step = () => {
+    drawFrame(fr[i]);
+    e.target.textContent = `Cancel (${Math.round(i / fr.length * 100)} %)`;
+    if (++i >= fr.length) { timer = setTimeout(() => rec.stop(), 200); return; }
+    timer = setTimeout(step, Math.min(2000, Math.max(0, fr[i].time - fr[i - 1].time)));
+  };
+  S.lastVid = { cancel: () => { cancelled = true; clearTimeout(timer); rec.stop(); } };
+  e.target.classList.add("active");
+  rec.start(500); step();
+};
+
+/* ==========================================================================
+ * Sources: Web Serial, Web Bluetooth and Demo
+ * ======================================================================== */
+let port = null, reader = null, writer = null, parser = null, demoTimer = 0;
+const enc = new TextEncoder();
+
+function setStatus(state, text) { $("status").dataset.state = state; $("statusText").textContent = text; }
+async function send(cmd) {
+  if (S.source === "demo") { demoCommand(cmd); return; }
+  if (S.source === "ble") { bleSend(cmd); return; }
+  if (!writer) return;
+  try { await writer.write(enc.encode(cmd + "\n")); } catch (err) { console.warn("send failed", err); }
+}
+function resetCounters() { S.frames = 0; S.crcErrors = 0; S.dropped = 0; S.lastSeq = null; S.fpsEma = 0; S.lastArrive = 0; S.sLo = S.sHi = null; S.gotInfo = false; }
+
+async function connectSerial() {
+  if (!("serial" in navigator)) { $("noSerial").classList.remove("hidden"); return; }
+  if (S.source === "ble") await disconnectBle(false);
+  stopDemo();
+  try {
+    port = await navigator.serial.requestPort({ filters: [{ usbVendorId: 0x0483, usbProductId: 0x5740 }] });
+  } catch (err) { return; } // chooser cancelled
+  try {
+    await port.open({ baudRate: 115200, bufferSize: 65536 });
+  } catch (err) {
+    setStatus("error", "Cannot open port");
+    alert("Could not open the port.\n\nOn Linux, your user must be in the 'dialout' group:\n  sudo usermod -aG dialout $USER\nthen log out and back in.\n\n(" + err.message + ")");
+    port = null; return;
+  }
+  try { await port.setSignals({ dataTerminalReady: true, requestToSend: true }); } catch (_) {}
+  S.source = "serial"; resetCounters();
+  $("btnConnect").textContent = "Disconnect"; $("btnConnect").classList.remove("primary");
+  setStatus("wait", "Connected · waiting for frames");
+  parser = new StreamParser(onPacket);
+  writer = port.writable.getWriter();
+  send("?");
+  // If only text arrives, this is the CLI port, not the stream port.
+  setTimeout(() => { if (S.source === "serial" && parser && parser.packets === 0 && parser.textish > 8) $("cliHint").classList.remove("hidden"); }, 2500);
+  readLoop();
+}
+async function readLoop() {
+  while (port && port.readable) {
+    reader = port.readable.getReader();
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        if (value) { parser.push(value); if (parser.packets) setStatus("live", "Streaming"); }
+      }
+    } catch (err) {
+      console.warn("read error", err);
+      setStatus("error", "Connection lost"); break;
+    } finally { try { reader.releaseLock(); } catch (_) {} }
+    if (S.source !== "serial") break;
+  }
+  if (S.source === "serial") await disconnectSerial(true);
+}
+async function disconnectSerial(lost) {
+  const p = port; port = null; S.source = null;
+  try { if (reader) await reader.cancel(); } catch (_) {}
+  try { if (writer) { writer.releaseLock(); } } catch (_) {}
+  try { if (p) await p.close(); } catch (_) {}
+  reader = writer = null;
+  $("btnConnect").textContent = "Connect USB"; $("btnConnect").classList.add("primary");
+  setStatus(lost ? "error" : "off", lost ? "Disconnected" : "Not connected");
+}
+$("btnConnect").onclick = () => (S.source === "serial" ? disconnectSerial(false) : connectSerial());
+if (navigator.serial) navigator.serial.addEventListener("disconnect", (e) => { if (port && e.target === port) disconnectSerial(true); });
+if (!("serial" in navigator) && !navigator.bluetooth) $("noSerial").classList.remove("hidden");
+if (!("serial" in navigator)) $("btnConnect").disabled = true;
+if (!navigator.bluetooth) $("btnConnectBle").disabled = true;
+
+/* ---- Web Bluetooth: the Flipper's own BLE serial service ----
+ * Same packets as USB, delivered as indications. The Flipper cannot tell us
+ * the link's MTU, so we ask for 180-byte pieces (fits every desktop OS and
+ * Android) and fall back to 20 bytes if no packet arrives intact. */
+const BLE_SVC = "8fe5b3d5-2e7f-4a98-2a48-7acc60fe0000";
+const BLE_FROM_FLIPPER = "19ed82ae-ed21-4c9d-4145-228e61fe0000";
+const BLE_TO_FLIPPER = "19ed82ae-ed21-4c9d-4145-228e62fe0000";
+let bleDev = null, bleIn = null, bleOut = null, bleQueue = Promise.resolve(), bleTimer = 0;
+
+function bleSend(cmd) {
+  if (!bleOut) return;
+  // one GATT operation at a time, or Chrome throws "operation in progress"
+  bleQueue = bleQueue.then(() => bleOut.writeValue(enc.encode(cmd + "\n"))).catch(err => console.warn("BLE write failed", err));
+}
+function onBleData(ev) {
+  const v = ev.target.value;
+  parser.push(new Uint8Array(v.buffer, v.byteOffset, v.byteLength));
+  if (parser.packets) setStatus("live", "Streaming · Bluetooth");
+}
+async function connectBle() {
+  if (!navigator.bluetooth) { $("noSerial").classList.remove("hidden"); return; }
+  if (S.source === "serial") await disconnectSerial(false);
+  stopDemo();
+  $("bleHint").classList.remove("hidden");
+  try {
+    bleDev = await navigator.bluetooth.requestDevice({ filters: [{ namePrefix: "Flipper" }], optionalServices: [BLE_SVC] });
+  } catch (err) { return; } // chooser cancelled
+  bleDev.addEventListener("gattserverdisconnected", () => { if (S.source === "ble") disconnectBle(true); });
+  setStatus("wait", "Pairing / connecting…");
+  try {
+    const server = await bleDev.gatt.connect();
+    const svc = await server.getPrimaryService(BLE_SVC);
+    bleIn = await svc.getCharacteristic(BLE_FROM_FLIPPER);
+    bleOut = await svc.getCharacteristic(BLE_TO_FLIPPER);
+    parser = new StreamParser(onPacket);
+    bleIn.addEventListener("characteristicvaluechanged", onBleData);
+    await bleIn.startNotifications(); // indications; triggers pairing the first time
+  } catch (err) {
+    console.warn(err);
+    setStatus("error", "Bluetooth failed");
+    alert("Could not connect over Bluetooth.\n\nCheck that the Flipper is in the Bluetooth view with the stream on (press OK), " +
+      "and that you typed the PIN the Flipper showed.\n\n(" + err.message + ")");
+    try { bleDev.gatt.disconnect(); } catch (_) {}
+    bleDev = bleIn = bleOut = null; return;
+  }
+  S.source = "ble"; resetCounters();
+  $("btnConnectBle").textContent = "Disconnect"; $("btnConnectBle").classList.remove("primary");
+  setStatus("wait", "Connected · waiting for frames");
+  let chunk = 180;
+  bleSend("M" + chunk); bleSend("?");
+  // Nothing parses: pieces too big for this link, try the size every link takes.
+  // No frames for a while: the Flipper stops after missed confirms, so say hello again.
+  clearInterval(bleTimer);
+  let quiet = 0, seenFrames = 0;
+  bleTimer = setInterval(() => {
+    if (S.source !== "ble") return;
+    if (S.frames === seenFrames) quiet++; else quiet = 0;
+    seenFrames = S.frames;
+    if (!S.gotInfo && chunk > 20 && quiet >= 3) { chunk = 20; bleSend("M20"); bleSend("?"); quiet = 0; }
+    else if (quiet >= 4) { bleSend("?"); quiet = 0; }
+  }, 1000);
+}
+async function disconnectBle(lost) {
+  S.source = null; clearInterval(bleTimer);
+  try { if (bleIn) bleIn.removeEventListener("characteristicvaluechanged", onBleData); } catch (_) {}
+  try { if (bleDev && bleDev.gatt.connected) bleDev.gatt.disconnect(); } catch (_) {}
+  bleDev = bleIn = bleOut = null;
+  $("btnConnectBle").textContent = "Connect Bluetooth"; $("btnConnectBle").classList.add("primary");
+  setStatus(lost ? "error" : "off", lost ? "Disconnected" : "Not connected");
+}
+$("btnConnectBle").onclick = () => (S.source === "ble" ? disconnectBle(false) : connectBle());
+
+/* ---- Demo: builds real protocol packets and feeds them through the parser ---- */
+const demo = { e: 95, r: 4, s: 1, c: 1, rec: 0, seq: 0, t0: 0 };
+function demoCommand(cmd) {
+  const k = cmd[0], v = parseInt(cmd.slice(1));
+  if (k === "E" && v >= 50 && v <= 100) demo.e = v;
+  if (k === "R" && v >= 0 && v <= 7) { demo.r = v; restartDemoTimer(); }
+  if (k === "S" && v >= 0 && v <= 2) demo.s = v;
+  if (k === "C" && (v === 0 || v === 1)) demo.c = v;
+  if (k === "K") flash("Demo: the Flipper would save a still now");
+  if (k === "G") flash("Demo: the Flipper would save its spot graph now");
+  if (k === "V" && (v === 0 || v === 1)) demo.rec = v;
+  parser.push(demoPacket(2, null, `app=thermal_cam;ver=1.2;w=32;h=24;e=${demo.e};r=${demo.r};s=${demo.s};c=${demo.c};unit=C;rec=${demo.rec};link=demo`));
+}
+function demoPacket(type, temps, text) {
+  const payload = type === 1 ? NPIX * 2 : enc.encode(text).length;
+  const b = new Uint8Array(HDR + payload + 4), dv = new DataView(b.buffer);
+  b.set(MAGIC, 0); b[4] = 1; b[5] = type; dv.setUint16(6, payload, true);
+  dv.setUint32(8, demo.seq++, true); dv.setUint32(12, (performance.now() - demo.t0) | 0, true);
+  dv.setInt16(16, 2950, true); b[18] = demo.e; b[19] = demo.c | ((demo.seq & 1) << 1); b[20] = demo.r; b[21] = demo.s;
+  if (type === 1) for (let i = 0; i < NPIX; i++) dv.setInt16(HDR + i * 2, Math.round(temps[i] * 100), true);
+  else b.set(enc.encode(text), HDR);
+  dv.setUint32(HDR + payload, crc32(b, 0, HDR + payload), true);
+  return b;
+}
+function demoScene(t) {
+  const out = new Float32Array(NPIX), em = demo.e / 100;
+  const hx = 16 + 9 * Math.sin(t * 0.35), hy = 11 + 4 * Math.cos(t * 0.5); // a warm hand moving around
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    let v = 21 + 0.12 * x + 0.06 * y;                                  // wall gradient
+    const d1 = ((x - hx) ** 2) / 14 + ((y - hy) ** 2) / 20;              // hand
+    v += 12.5 * Math.exp(-d1);
+    const d2 = ((x - 26) ** 2 + (y - 17) ** 2) / 5;                      // mug of tea
+    v += (38 + 6 * Math.sin(t * 0.2)) * Math.exp(-d2 * d2 * 0.25);
+    if (y > 20 && x < 9) v -= 9;                                         // cold window sill
+    v += (Math.random() - 0.5) * 0.25;                                   // sensor noise
+    out[y * W + x] = 23 + (v - 23) * (0.6 + 0.4 * em / 0.95);
+  }
+  return out;
+}
+function restartDemoTimer() {
+  clearInterval(demoTimer);
+  const hz = [0.5, 1, 2, 4, 8, 16, 32, 64][demo.r];
+  demoTimer = setInterval(() => {
+    const pk = demoPacket(1, demoScene((performance.now() - demo.t0) / 1000));
+    // split into USB-sized pieces to exercise re-assembly
+    for (let i = 0; i < pk.length; i += 64) parser.push(pk.subarray(i, i + 64));
+  }, 1000 / Math.min(hz, 30));
+}
+function startDemo() {
+  if (S.source === "serial" || S.source === "ble") return;
+  S.source = "demo"; resetCounters(); demo.t0 = performance.now();
+  parser = new StreamParser(onPacket);
+  setStatus("live", "Demo data");
+  $("btnDemo").classList.add("active"); $("btnDemo").textContent = "Stop demo";
+  demoCommand("?"); restartDemoTimer();
+}
+function stopDemo() {
+  if (S.source !== "demo") return;
+  clearInterval(demoTimer); S.source = null; setStatus("off", "Not connected");
+  $("btnDemo").classList.remove("active"); $("btnDemo").textContent = "Demo";
+}
+$("btnDemo").onclick = () => (S.source === "demo" ? stopDemo() : startDemo());
+
+/* ---- init ---- */
+setPalette("ironbow");
+requestRender();
+</script>
+</body>
+</html>

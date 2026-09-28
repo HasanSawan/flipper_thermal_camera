@@ -1,0 +1,14 @@
+Thermal Camera for Flipper Zero
+Copyright 2026 Hasan SAWAN
+
+This product is licensed under the Apache License, Version 2.0
+(see the LICENSE file).
+
+This product includes software derived from the Melexis MLX90640 library
+(https://github.com/melexis/mlx90640-library):
+  Copyright 2017 Melexis N.V.
+  Licensed under the Apache License, Version 2.0.
+The derived portions are the EEPROM parameter extraction and temperature
+calculation in mlx90640.c and mlx90640.h, adapted for the Flipper Zero
+I2C API, with fixes for undefined left-shifts of negative values and for
+division by zero on invalid calibration constants.
