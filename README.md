@@ -9,6 +9,12 @@ Turn your Flipper Zero into a thermal camera with an MLX90640 32×24 infrared se
 
 <img src="docs/images/photos/hero.jpg" alt="Flipper Zero with an MLX90640 thermal sensor" width="640">
 
+### Demo video
+
+[![Watch the demo on YouTube](https://img.youtube.com/vi/FziZeKUH8gE/hqdefault.jpg)](https://www.youtube.com/watch?v=FziZeKUH8gE)
+
+[Discussion on Reddit](https://www.reddit.com/r/flipperzero/comments/1wqqs9u/i_turned_my_flipper_zero_into_a_thermal_camera/)
+
 </div>
 
 ## Features
